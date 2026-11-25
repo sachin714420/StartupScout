@@ -13,19 +13,26 @@ function App() {
   const [jobs, setJobs] = useState([]);
   const [search, setSearch] = useState("");
   const [category, setCategory] = useState("All");
-  const [saved, setSaved] = useState(() => {
-  
-  return JSON.parse(localStorage.getItem("startupscout_saved") || "[]");
-}); 
+   const [saved, setSaved] = useState([]);
 const [showSaved, setShowSaved] = useState(false);
  const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [mobileMenu, setMobileMenu] = useState(false);
   const [showAuth, setShowAuth] = useState(false);
 const [authMode, setAuthMode] = useState("login");
+const [authName, setAuthName] = useState("");
+const [authEmail, setAuthEmail] = useState("");
+const [authPassword, setAuthPassword] = useState("");
+const [authLoading, setAuthLoading] = useState(false);
+const [authError, setAuthError] = useState("");
+const [showProfileMenu, setShowProfileMenu] = useState(false);
+
+const [user, setUser] = useState(() => {
+  return JSON.parse(localStorage.getItem("startupscout_user") || "null");
+});
 
   useEffect(() => {
-    async function loadJobs() {
+    async function loadJobs() { 
       try {
         setLoading(true);
         const response = await fetch(API);
@@ -45,32 +52,153 @@ const [authMode, setAuthMode] = useState("login");
   }, []);
 
   
+const handleAuth = async (e) => {
+  e.preventDefault();
+  setAuthError("");
+  setAuthLoading(true);
+
+  try {
+    const endpoint =
+      authMode === "login" ? "login" : "register";
+
+    const response = await fetch(
+      `http://localhost:5000/api/auth/${endpoint}`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          name: authName,
+          email: authEmail,
+          password: authPassword
+        })
+      }
+    );
+
+    const result = await response.json();
+
+    if (!response.ok) {
+      throw new Error(result.message || "Authentication failed");
+    }
+
+    localStorage.setItem("startupscout_token", result.token);
+    localStorage.setItem("startupscout_user", JSON.stringify(result.user));
+
+    setUser(result.user);
+    setShowAuth(false);
+    setAuthName("");
+    setAuthEmail("");
+    setAuthPassword("");
+
+    alert(result.message);
+
+  } catch (error) {
+    setAuthError(error.message);
+  } finally {
+    setAuthLoading(false);
+  }
+};
+
+const handleLogout = () => {
+  localStorage.removeItem("startupscout_token");
+  localStorage.removeItem("startupscout_user");
+
+  setUser(null);
+  setSaved([]);
+  setShowSaved(false);
+  setShowAuth(false);
+
+  alert("Logged out successfully!");
+};
+
+useEffect(() => {
+  async function loadSavedJobs() {
+    if (!user) {
+      setSaved([]);
+      return;
+    }
+
+    try {
+      const token = localStorage.getItem("startupscout_token");
+
+      const response = await fetch(
+        "http://localhost:5000/api/saved-jobs",
+        {
+          headers: {
+            Authorization: `Bearer ${token}`
+          }
+        }
+      );
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(result.message);
+      }
+
+      setSaved(
+        (result.data || []).map(job =>
+          Number(job.opportunity_id)
+        )
+      );
+    } catch (error) {
+      console.error("Load saved jobs:", error);
+    }
+  }
+
+  loadSavedJobs();
+}, [user]);
+  
 const filteredJobs = useMemo(() => {
   return jobs.filter((job) => {
     const text = `${job.title} ${job.company} ${(job.skills || []).join(" ")}`.toLowerCase();
 
     const matchesSearch = text.includes(search.toLowerCase());
     const matchesCategory = category === "All" || job.type === category;
-    const matchesSaved = !showSaved || saved.includes(job.id);
+    const matchesSaved = !showSaved || saved.includes(Number(job.dbId));
 
     return matchesSearch && matchesCategory && matchesSaved;
   });
 }, [jobs, search, category, showSaved, saved]);
 
 
-  const toggleSave = (id) => {
-  setSaved((previous) => {
-    const updated = previous.includes(id)
-      ? previous.filter((item) => item !== id)
-      : [...previous, id];
+  const toggleSave = async (id) => {
+  if (!user) {
+    setAuthMode("login");
+    setShowAuth(true);
+    return;
+  }
 
-    localStorage.setItem(
-      "startupscout_saved",
-      JSON.stringify(updated)
+  const token = localStorage.getItem("startupscout_token");
+  const opportunityId = Number(id);
+  const isSaved = saved.includes(opportunityId);
+
+  try {
+    const response = await fetch(
+      `http://localhost:5000/api/saved-jobs/${opportunityId}`,
+      {
+        method: isSaved ? "DELETE" : "POST",
+        headers: {
+          Authorization: `Bearer ${token}`
+        }
+      }
     );
 
-    return updated;
-  });
+    const result = await response.json();
+
+    if (!response.ok) {
+      throw new Error(result.message);
+    }
+
+    setSaved(previous =>
+      isSaved
+        ? previous.filter(item => item !== opportunityId)
+        : [...previous, opportunityId]
+    );
+  } catch (error) {
+    alert(error.message);
+  }
 };
 
   return (
@@ -92,15 +220,36 @@ const filteredJobs = useMemo(() => {
           <span className="live-status">
             <span className="live-dot"></span> Live discovery
           </span>
-          <button
-  className="profile-button"
-  onClick={() => {
-    setAuthMode("login");
-    setShowAuth(true);
-  }}
->
-  S
-</button>
+          <div className="profile-wrapper">
+  <button
+    className="profile-button"
+    onClick={() => {
+      if (user) {
+        setShowProfileMenu(!showProfileMenu);
+      } else {
+        setAuthMode("login");
+        setShowAuth(true);
+      }
+    }}
+    title="Profile"
+  >
+    {user?.name?.charAt(0).toUpperCase() || "S"}
+  </button>
+
+  {user && showProfileMenu && (
+    <div className="profile-dropdown">
+      <p>{user.name}</p>
+      <button
+        onClick={() => {
+          handleLogout();
+          setShowProfileMenu(false);
+        }}
+      >
+        Logout
+      </button>
+    </div>
+  )}
+</div>
         </div>
 
         <button className="menu-button" onClick={() => setMobileMenu(!mobileMenu)}>
@@ -131,21 +280,49 @@ const filteredJobs = useMemo(() => {
           : "Join StartupScout and discover opportunities."}
       </p>
 
-      <form onSubmit={(e) => {
-        e.preventDefault();
-        alert("Authentication will be connected to the backend in the next step.");
-      }}>
-        {authMode === "signup" && (
-          <input type="text" placeholder="Full Name" required />
-        )}
+      <form onSubmit={handleAuth}>
+  {authMode === "signup" && (
+    <input
+      type="text"
+      placeholder="Full Name"
+      value={authName}
+      onChange={(e) => setAuthName(e.target.value)}
+      required
+    />
+  )}
 
-        <input type="email" placeholder="Email Address" required />
-        <input type="password" placeholder="Password" required />
+  <input
+    type="email"
+    placeholder="Email Address"
+    value={authEmail}
+    onChange={(e) => setAuthEmail(e.target.value)}
+    required
+  />
 
-        <button type="submit" className="auth-submit">
-          {authMode === "login" ? "Login" : "Create Account"}
-        </button>
-      </form>
+  <input
+    type="password"
+    placeholder="Password"
+    value={authPassword}
+    onChange={(e) => setAuthPassword(e.target.value)}
+    required
+  />
+
+  {authError && (
+    <p style={{ color: "red" }}>{authError}</p>
+  )}
+
+  <button
+    type="submit"
+    className="auth-submit"
+    disabled={authLoading}
+  >
+    {authLoading
+      ? "Please wait..."
+      : authMode === "login"
+      ? "Login"
+      : "Create Account"}
+  </button>
+</form>
 
       <div className="auth-switch">
         {authMode === "login"
@@ -282,11 +459,22 @@ const filteredJobs = useMemo(() => {
                       <BriefcaseBusiness size={23} />
                     </div>
                     <button
-                      className={saved.includes(job.id) ? "save-button saved" : "save-button"}
-                      onClick={() => toggleSave(job.id)}
+                      className={
+                        saved.includes(Number(job.dbId))
+                          ? "save-button saved"
+                          : "save-button"
+                      }
+                      onClick={() => toggleSave(job.dbId)}
                       aria-label="Save opportunity"
                     >
-                      <Bookmark size={19} fill={saved.includes(job.id) ? "currentColor" : "none"} />
+                      <Bookmark
+                        size={19}
+                        fill={
+                          saved.includes(Number(job.dbId))
+                            ? "currentColor"
+                            : "none"
+                        }
+                      />
                     </button>
                   </div>
 
@@ -337,5 +525,4 @@ const filteredJobs = useMemo(() => {
     </div>
   );
 }
-
 export default App;

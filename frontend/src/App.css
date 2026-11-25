@@ -100,11 +100,18 @@ a { color: inherit; text-decoration: none; }
 .profile-button {
   width: 35px;
   height: 35px;
+  min-width: 35px;
   border: 1px solid #32695a;
   border-radius: 50%;
   background: #183d32;
   color: #7bf1c4;
   font-weight: 700;
+  font-size: 17px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex-shrink: 0;
 }
 
 .menu-button { display: none; }
@@ -703,4 +710,66 @@ footer {
   font-weight: 700;
   margin-left: 6px;
   cursor: pointer;
+}
+
+
+
+
+/* Profile Dropdown */
+.profile-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.profile-button {
+  width: 35px;
+  height: 35px;
+  min-width: 35px;
+  border: 1px solid #32695a;
+  border-radius: 50%;
+  background: #183d32;
+  color: #7bf1c4;
+  font-weight: 700;
+  font-size: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.profile-dropdown {
+  position: absolute;
+  top: 45px;
+  right: 0;
+  width: 170px;
+  padding: 12px;
+  background: #102b23;
+  border: 1px solid #32695a;
+  border-radius: 10px;
+  z-index: 1000;
+  box-shadow: 0 8px 25px rgba(0, 0, 0, 0.3);
+}
+
+.profile-dropdown p {
+  color: #7bf1c4;
+  font-size: 14px;
+  margin: 0 0 10px;
+  overflow-wrap: anywhere;
+}
+
+.profile-dropdown button {
+  width: 100%;
+  padding: 9px;
+  border: none;
+  border-radius: 6px;
+  background: #32695a;
+  color: white;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.profile-dropdown button:hover {
+  background: #3d806c;
 }

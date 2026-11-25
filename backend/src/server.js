@@ -8,6 +8,8 @@ const PORT = process.env.PORT || 5000;
 
 app.use(cors());
 app.use(express.json());
+app.use("/api/auth", require("./routes/auth"));
+app.use("/api/saved-jobs", require("./savedJobs"));
 
 // Cache jobs to avoid repeatedly calling the external API
 let cachedJobs = [];
@@ -74,6 +76,160 @@ async function fetchJobs() {
   return cachedJobs;
 }
 
+
+const db = require("./db");
+
+async function syncJobsToDatabase(jobs) {
+  const connection = await db.getConnection();
+
+  try {
+    await connection.beginTransaction();
+
+    for (const job of jobs) {
+      const [company] = await connection.execute(
+        `INSERT INTO companies (company_name)
+         VALUES (?)
+         ON DUPLICATE KEY UPDATE company_id = LAST_INSERT_ID(company_id)`,
+        [job.company]
+      );
+
+      const companyId = company.insertId;
+
+      const [result] = await connection.execute(
+        `INSERT INTO opportunities
+         (company_id, title, opportunity_type, location, source, apply_url, external_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?)
+         ON DUPLICATE KEY UPDATE
+         title = VALUES(title),
+         company_id = VALUES(company_id),
+         opportunity_id = LAST_INSERT_ID(opportunity_id)`,
+        [
+          companyId,
+          job.title,
+          job.type,
+          job.location,
+          job.source,
+          job.url,
+          job.id
+        ]
+      );
+
+      const opportunityId = result.insertId;
+
+      for (const skill of [...new Set(job.skills || [])]) {
+        if (!skill || skill.length > 100) continue;
+
+        const [skillResult] = await connection.execute(
+          `INSERT INTO skills (skill_name)
+           VALUES (?)
+           ON DUPLICATE KEY UPDATE skill_id = LAST_INSERT_ID(skill_id)`,
+          [skill]
+        );
+
+        await connection.execute(
+          `INSERT IGNORE INTO opportunity_skills
+           (opportunity_id, skill_id) VALUES (?, ?)`,
+          [opportunityId, skillResult.insertId]
+        );
+      }
+    }
+
+    await connection.commit();
+    return jobs.length;
+  } catch (error) {
+    await connection.rollback();
+    throw error;
+  } finally {
+    connection.release();
+  }
+}
+
+// Sync live opportunities into MySQL
+let lastDatabaseSync = 0;
+
+async function syncJobsToDatabase(jobs) {
+  const connection = await db.getConnection();
+
+  try {
+    await connection.beginTransaction();
+
+    for (const job of jobs) {
+      // 1. Insert or find company
+      const [companyResult] = await connection.execute(
+        `INSERT INTO companies (company_name)
+         VALUES (?)
+         ON DUPLICATE KEY UPDATE
+         company_id = LAST_INSERT_ID(company_id)`,
+        [job.company]
+      );
+
+      const companyId = companyResult.insertId;
+
+      // 2. Insert or update opportunity
+      const [opportunityResult] = await connection.execute(
+        `INSERT INTO opportunities
+         (company_id, title, opportunity_type, location, source, apply_url, external_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?)
+         ON DUPLICATE KEY UPDATE
+         opportunity_id = LAST_INSERT_ID(opportunity_id),
+         company_id = VALUES(company_id),
+         title = VALUES(title),
+         opportunity_type = VALUES(opportunity_type),
+         location = VALUES(location),
+         source = VALUES(source),
+         apply_url = VALUES(apply_url)`,
+        [
+          companyId,
+          job.title,
+          job.type,
+          job.location,
+          job.source,
+          job.url,
+          job.id
+        ]
+      );
+
+      const opportunityId = opportunityResult.insertId;
+
+      // 3. Update opportunity skills
+      await connection.execute(
+        "DELETE FROM opportunity_skills WHERE opportunity_id = ?",
+        [opportunityId]
+      );
+
+      for (const skill of (job.skills || [])) {
+        const skillName = String(skill).trim();
+        if (!skillName) continue;
+
+        const [skillResult] = await connection.execute(
+          `INSERT INTO skills (skill_name)
+           VALUES (?)
+           ON DUPLICATE KEY UPDATE
+           skill_id = LAST_INSERT_ID(skill_id)`,
+          [skillName]
+        );
+
+        await connection.execute(
+          `INSERT IGNORE INTO opportunity_skills
+           (opportunity_id, skill_id)
+           VALUES (?, ?)`,
+          [opportunityId, skillResult.insertId]
+        );
+      }
+    }
+
+    await connection.commit();
+    console.log(`Database synced: ${jobs.length} opportunities`);
+
+  } catch (error) {
+    await connection.rollback();
+    console.error("Database sync error:", error.message);
+    throw error;
+  } finally {
+    connection.release();
+  }
+}
+
 // Health API
 app.get("/api/health", (req, res) => {
   res.json({
@@ -89,23 +245,47 @@ app.get("/api/opportunities", async (req, res) => {
 
     let result = await fetchJobs();
 
+    // Sync opportunities with MySQL
+    if (Date.now() - lastDatabaseSync > CACHE_DURATION) {
+      await syncJobsToDatabase(result);
+      lastDatabaseSync = Date.now();
+    }
+
+    // Get MySQL IDs for opportunities
+    const [dbRows] = await db.execute(
+      "SELECT opportunity_id, external_id FROM opportunities WHERE external_id IS NOT NULL"
+    );
+
+    const idMap = new Map(
+      dbRows.map(row => [row.external_id, row.opportunity_id])
+    );
+
+    // Add database ID to every opportunity
+    result = result.map(job => ({
+      ...job,
+      dbId: idMap.get(job.id) ?? null
+    }));
+
+    // Search filter
     if (search) {
       const keyword = search.toLowerCase();
 
       result = result.filter(job =>
-        `${job.title} ${job.company} ${job.skills.join(" ")}`
+        `${job.title} ${job.company} ${(job.skills || []).join(" ")}`
           .toLowerCase()
           .includes(keyword)
       );
     }
 
+    // Type filter
     if (type && type !== "All") {
       result = result.filter(job => job.type === type);
     }
 
+    // Location filter
     if (location) {
       result = result.filter(job =>
-        job.location.toLowerCase().includes(location.toLowerCase())
+        (job.location || "").toLowerCase().includes(location.toLowerCase())
       );
     }
 
@@ -126,7 +306,6 @@ app.get("/api/opportunities", async (req, res) => {
 });
 
 // Start server
-const db = require("./db");
 
 db.getConnection()
   .then(connection => {
