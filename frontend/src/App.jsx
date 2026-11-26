@@ -7,7 +7,7 @@ import {
 } from "lucide-react";
 import "./App.css";
 
-const API = "http://localhost:5000/api/opportunities";
+const API = "https://startupscout.onrender.com/api/opportunities";
 
 function App() {
   const [jobs, setJobs] = useState([]);
@@ -62,7 +62,7 @@ const handleAuth = async (e) => {
       authMode === "login" ? "login" : "register";
 
     const response = await fetch(
-      `http://localhost:5000/api/auth/${endpoint}`,
+      `https://startupscout.onrender.com/api/auth/${endpoint}`,
       {
         method: "POST",
         headers: {
@@ -123,7 +123,7 @@ useEffect(() => {
       const token = localStorage.getItem("startupscout_token");
 
       const response = await fetch(
-        "http://localhost:5000/api/saved-jobs",
+        "https://startupscout.onrender.com/api/saved-jobs",
         {
           headers: {
             Authorization: `Bearer ${token}`
@@ -176,7 +176,7 @@ const filteredJobs = useMemo(() => {
 
   try {
     const response = await fetch(
-      `http://localhost:5000/api/saved-jobs/${opportunityId}`,
+      `https://startupscout.onrender.com/api/saved-jobs/${opportunityId}`,
       {
         method: isSaved ? "DELETE" : "POST",
         headers: {
