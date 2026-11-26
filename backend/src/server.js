@@ -309,13 +309,19 @@ app.get("/api/opportunities", async (req, res) => {
     });
 
   } catch (error) {
-    console.error("Opportunity fetch error:", error);
+  console.error("OPPORTUNITY ERROR DETAILS:", JSON.stringify({
+    name: error?.name,
+    message: error?.message,
+    stack: error?.stack,
+    cause: error?.cause ? String(error.cause) : null,
+    errorString: String(error)
+  }));
 
-    res.status(502).json({
-      success: false,
-      message: "Unable to fetch opportunities. Please try again later."
-    });
-  }
+  res.status(502).json({
+    success: false,
+    message: "Unable to fetch opportunities. Please try again later."
+  });
+}
 });
 
 
