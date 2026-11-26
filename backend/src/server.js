@@ -243,24 +243,37 @@ app.get("/api/opportunities", async (req, res) => {
   try {
     const { search, type, location } = req.query;
 
+    // Fetch live jobs from Arbeitnow
     let result = await fetchJobs();
 
-    // Sync opportunities with MySQL
+    // Database sync is optional
+    let idMap = new Map();
+
     if (Date.now() - lastDatabaseSync > CACHE_DURATION) {
-      await syncJobsToDatabase(result);
       lastDatabaseSync = Date.now();
+
+      try {
+        await syncJobsToDatabase(result);
+        console.log("Opportunities synced with database.");
+      } catch (dbError) {
+        console.error("Database sync skipped:", dbError);
+      }
     }
 
-    // Get MySQL IDs for opportunities
-    const [dbRows] = await db.execute(
-      "SELECT opportunity_id, external_id FROM opportunities WHERE external_id IS NOT NULL"
-    );
+    // Fetch database IDs only when database is available
+    try {
+      const [dbRows] = await db.execute(
+        "SELECT opportunity_id, external_id FROM opportunities WHERE external_id IS NOT NULL"
+      );
 
-    const idMap = new Map(
-      dbRows.map(row => [row.external_id, row.opportunity_id])
-    );
+      idMap = new Map(
+        dbRows.map(row => [row.external_id, row.opportunity_id])
+      );
+    } catch (dbError) {
+      console.log("Database ID lookup skipped:", dbError.message);
+    }
 
-    // Add database ID to every opportunity
+    // Add database IDs where available
     result = result.map(job => ({
       ...job,
       dbId: idMap.get(job.id) ?? null
@@ -296,7 +309,7 @@ app.get("/api/opportunities", async (req, res) => {
     });
 
   } catch (error) {
-    console.error("Opportunity fetch error:", error.message);
+    console.error("Opportunity fetch error:", error);
 
     res.status(502).json({
       success: false,
@@ -304,6 +317,7 @@ app.get("/api/opportunities", async (req, res) => {
     });
   }
 });
+
 
 // Start server
 
